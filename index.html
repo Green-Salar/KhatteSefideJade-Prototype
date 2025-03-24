@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Marketplace</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+        }
+        .control-btn {
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            text-align: center;
+        }
+        .popup button {
+            margin-top: 15px;
+            padding: 8px 15px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .color-preview {
+            width: 50px;
+            height: 50px;
+            margin: 10px auto;
+            border-radius: 5px;
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="info"><span id="remaining">100</span> pixels remaining</div>
+        <div id="controls">
+            <button id="buy" class="control-btn">Buy Random Pixel</button>
+            <button id="reset" class="control-btn">Reset All Pixels</button>
+        </div>
+    </div>
+    
+    <div id="purchasePopup" class="popup">
+        <h2>Pixel Purchased!</h2>
+        <p>You bought pixel #<span id="pixelNumber"></span></p>
+        <div class="color-preview" id="colorPreview"></div>
+        <button id="closePopup">Close</button>
+    </div>
+
+    <script>
+        // Initialize Three.js scene
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111);
+        
+        // Camera setup
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 15;
+        
+        // Renderer setup
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('container').appendChild(renderer.domElement);
+        
+        // Grid parameters
+        const gridSize = 10;
+        const pixelSize = 1;
+        const spacing = 1.05;
+        
+        // Arrays to store our pixels and their state
+        const pixels = [];
+        const availablePixels = [];
+        
+        // Create a group for all pixels
+        const pixelsGroup = new THREE.Group();
+        scene.add(pixelsGroup);
+        
+        // Create our 10x10 grid of pixels
+        for (let y = 0; y < gridSize; y++) {
+            for (let x = 0; x < gridSize; x++) {
+                const geometry = new THREE.BoxGeometry(pixelSize, pixelSize, pixelSize);
+                const material = new THREE.MeshBasicMaterial({ 
+                    color: 0x333333,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                
+                const pixel = new THREE.Mesh(geometry, material);
+                
+                // Position each pixel in the grid
+                pixel.position.x = (x - gridSize/2 + 0.5) * spacing;
+                pixel.position.y = (gridSize/2 - y - 0.5) * spacing;
+                
+                // Store the pixel's grid coordinates and index
+                pixel.userData = {
+                    x: x,
+                    y: y,
+                    index: y * gridSize + x,
+                    purchased: false
+                };
+                
+                pixelsGroup.add(pixel);
+                pixels.push(pixel);
+                availablePixels.push(pixel.userData.index);
+            }
+        }
+        
+        // No border frame in this version
+        
+        // Animation variables
+        let isAnimating = false;
+        let animationTarget = null;
+        let originalCameraPos = new THREE.Vector3();
+        let targetCameraPos = new THREE.Vector3();
+        let animationProgress = 0;
+        
+        // Track remaining pixels
+        let remainingPixels = gridSize * gridSize;
+        const remainingElement = document.getElementById('remaining');
+        
+        // Function to purchase a random pixel
+        function purchaseRandomPixel() {
+            if (isAnimating || availablePixels.length === 0) return;
+            
+            // Get a random index from available pixels
+            const randomIndex = Math.floor(Math.random() * availablePixels.length);
+            const pixelIndex = availablePixels[randomIndex];
+            
+            // Remove this pixel from available pixels
+            availablePixels.splice(randomIndex, 1);
+            
+            const selectedPixel = pixels[pixelIndex];
+            
+            // Generate a random color
+            const color = new THREE.Color(
+                Math.random(),
+                Math.random(),
+                Math.random()
+            );
+            
+            // Mark the pixel as purchased
+            selectedPixel.userData.purchased = true;
+            selectedPixel.material.color = color;
+            selectedPixel.material.opacity = 1.0;
+            
+            // Update remaining pixels count
+            remainingPixels--;
+            remainingElement.textContent = remainingPixels;
+            
+            // Prepare animation
+            isAnimating = true;
+            animationTarget = selectedPixel;
+            originalCameraPos.copy(camera.position);
+            
+            // Calculate target camera position for zoom
+            targetCameraPos.copy(selectedPixel.position);
+            targetCameraPos.z = 5; // Closer zoom
+            
+            // Display popup with pixel information
+            const pixelNumber = selectedPixel.userData.index + 1;
+            document.getElementById('pixelNumber').textContent = pixelNumber;
+            document.getElementById('colorPreview').style.backgroundColor = '#' + color.getHexString();
+            
+            // Reset animation progress
+            animationProgress = 0;
+            
+            // Check if all pixels are purchased
+            if (remainingPixels === 0) {
+                setTimeout(() => {
+                    alert("All pixels have been purchased! The artwork is complete.");
+                }, 2000);
+            }
+        }
+        
+        // Buy button functionality
+        document.getElementById('buy').addEventListener('click', purchaseRandomPixel);
+        
+        // Handle popup close button
+        document.getElementById('closePopup').addEventListener('click', () => {
+            document.getElementById('purchasePopup').style.display = 'none';
+        });
+        
+        // Reset button functionality
+        document.getElementById('reset').addEventListener('click', () => {
+            // Reset all pixels
+            pixels.forEach(pixel => {
+                pixel.userData.purchased = false;
+                pixel.material.color.set(0x333333);
+                pixel.material.opacity = 0.5;
+            });
+            
+            // Reset available pixels array
+            availablePixels.length = 0;
+            for (let i = 0; i < pixels.length; i++) {
+                availablePixels.push(i);
+            }
+            
+            // Reset counter
+            remainingPixels = gridSize * gridSize;
+            remainingElement.textContent = remainingPixels;
+            
+            // Reset camera position
+            camera.position.set(0, 0, 15);
+        });
+        
+        // Add mouse controls for rotation
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let rotationSpeed = 0.01;
+        
+        document.addEventListener('mousedown', (event) => {
+            isDragging = true;
+            previousMousePosition = {
+                x: event.clientX,
+                y: event.clientY
+            };
+        });
+        
+        document.addEventListener('mousemove', (event) => {
+            if (!isDragging || isAnimating) return;
+            
+            const deltaMove = {
+                x: event.clientX - previousMousePosition.x,
+                y: event.clientY - previousMousePosition.y
+            };
+            
+            // Rotate the pixel group based on mouse movement
+            pixelsGroup.rotation.y += deltaMove.x * rotationSpeed;
+            pixelsGroup.rotation.x += deltaMove.y * rotationSpeed;
+            
+            previousMousePosition = {
+                x: event.clientX,
+                y: event.clientY
+            };
+        });
+        
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+        
+        document.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (isAnimating) {
+                animationProgress += 0.02;
+                
+                if (animationProgress < 1) {
+                    // Zoom to pixel
+                    camera.position.lerpVectors(originalCameraPos, targetCameraPos, animationProgress);
+                    camera.lookAt(animationTarget.position);
+                    
+                    // Pulse effect for the selected pixel
+                    const scale = 1 + 0.2 * Math.sin(animationProgress * Math.PI * 4);
+                    animationTarget.scale.set(scale, scale, scale);
+                } else if (animationProgress < 2) {
+                    // Hold at zoomed position for a moment
+                    if (animationProgress === 1.02) {
+                        // Show popup
+                        document.getElementById('purchasePopup').style.display = 'block';
+                    }
+                } else if (animationProgress < 3) {
+                    // Zoom back out
+                    const t = (animationProgress - 2);
+                    camera.position.lerpVectors(targetCameraPos, originalCameraPos, t);
+                    animationTarget.scale.lerpVectors(
+                        new THREE.Vector3(1.2, 1.2, 1.2),
+                        new THREE.Vector3(1, 1, 1),
+                        t
+                    );
+                } else {
+                    // End animation
+                    isAnimating = false;
+                    camera.position.copy(originalCameraPos);
+                    animationTarget.scale.set(1, 1, 1);
+                    camera.lookAt(pixelsGroup.position);
+                }
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>
